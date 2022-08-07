@@ -19,7 +19,7 @@ def linear2sBGRA(nparr):
 	return temp.astype(np.uint8)
 
 print("Resizing and lowering fps with ffmpeg...")
-subprocess.call(f'ffmpeg -i "{sys.argv[1]}" -an -n -hide_banner -loglevel error -vf "fps=30, scale=-1:300, pad=ceil(iw/2)*2:0" temp.mp4')
+subprocess.call(f'ffmpeg -loglevel error -i "{sys.argv[1]}" -an -n -vf "fps=30, scale=-1:300, pad=ceil(iw/2)*2:0" temp.mp4')
 print("Capturing ffmpeg output...")
 video = cv2.VideoCapture('temp.mp4')
 if (video.isOpened() == False): 
