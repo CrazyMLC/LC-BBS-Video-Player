@@ -3,7 +3,7 @@ This is both a player and encoder of video. Put in a video file, and a javascrip
 
 ![An image of the Netronics Terminal, displaying a frame of the trailer to Star Wars IV: A New Hope. Two X-wing fighters fly towards the viewer, rendered in multiple text symbols and colors.](screenshot.png)
 
-Inspired by the work of [ethanhjennings](https://github.com/ethanhjennings/last-call-bbs-video-player), who made a funny joke which I can't even  a less funny.
+Inspired by the work of [ethanhjennings](https://github.com/ethanhjennings/last-call-bbs-video-player), who made a funny joke, to which I am doomed to be less funny than.
 
 # Controls
 
