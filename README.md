@@ -5,7 +5,7 @@ This is both a player and encoder of video. Put in a video file, and a javascrip
 
 This video encoding and playback is powered by variable frame timings, and RLE compression.
 
-This project is inspired by the work of [ethanhjennings](https://github.com/ethanhjennings/last-call-bbs-video-player), who made a funny joke, which I am doomed to be less funny than.
+This project is inspired by the work of [ethanhjennings](https://github.com/ethanhjennings/last-call-bbs-video-player), who made a funnier joke than I ever will.
 
 # Controls
 
