@@ -1,7 +1,7 @@
-import threading
+import threading,queue
 import cv2
 import numpy as np
-import subprocess,sys,os
+import subprocess,sys,os,math
 from time import sleep,perf_counter
 from datetime import timedelta
 colorDebug = 0
@@ -32,7 +32,11 @@ crop_amount = int(max(0,frame_width - 504)/2)# the terminal is only 504 pixels w
 if crop_amount:
 	frame_width = int(frame_width - 2*crop_amount)
 display_xoffset = (504-frame_width)/2# for dealing with videos that are too thin
-
+if frame_width % 9 > 0:
+	pad_left = 9 - (frame_width % 9)
+	frame_width += pad_left
+	pad_right = math.ceil(pad_left/2)
+	pad_left = int(pad_left/2)
 if colorDebug:
 	result = cv2.VideoWriter('debug.avi',
 							cv2.VideoWriter_fourcc(*'MJPG'),
@@ -49,7 +53,6 @@ mul -= add
 txt_lastframe = np.full((20,int((frame_width+8)/9)),'D5')
 txt_buffer = txt_lastframe.copy()
 
-
 font = cv2.imread('system_bold_bw.png',0)/255.0
 #chars = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz.,:;!?&#/\\%\'"0123456789+-*()[]^█▟▙▜▛▀▄▐▌▝▘▗▖─⚉═║╔╗╚╝╠╣╦╩╬>▲▼™`♦♣♠♥<☺☻ '
 palette = sBGRA2linear(cv2.imread('palette.png'))[0]
@@ -61,7 +64,6 @@ def encode_chunk(img,diffs,bufx,bufy):
 	global txt_buffer
 	character = [1,1]#color,symbol
 	score = float('inf')#smaller is better
-	
 	min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY))
 	if max_val-0.001 < palette_grey[0]:
 		#print("black")
@@ -107,6 +109,15 @@ def encode_chunk(img,diffs,bufx,bufy):
 	txt_buffer[bufy][bufx] = result
 	#print(character,score,temp_score)
 
+q = queue.Queue()
+def worker():
+	while True:
+		i = q.get()
+		encode_chunk(i[0],i[1],i[2],i[3])
+		q.task_done()
+for i in range(32):
+	threading.Thread(target=worker, daemon=True).start()
+
 def encode_rle(txt):
 	flat = txt.flatten()
 	result = flat[0]
@@ -123,8 +134,7 @@ def encode_rle(txt):
 			result += flat[i]
 			i+=1
 	return result
-		
-		
+
 def end():
 	video.release()
 	cv2.destroyAllWindows()
@@ -167,39 +177,32 @@ while(newFrame):
 	if newFrame:
 		delay -= 1
 		if delay <= 0:
-			diffs = list(range(18))
 			print(f"\rFrame {frameCount}: Preprocessing...   ({completion}% total, {timedelta(seconds=round(perf_counter()-start))})", end='', flush=True)
+			if crop_amount > 0:
+				frame = frame[:, crop_amount:-crop_amount]
 			frame = unsharp_mask(cv2.fastNlMeansDenoisingColored(frame,None,5,5,5,15), amount = 2.0)
-			frame = (sBGRA2linear(frame[:, crop_amount:-crop_amount])*mul)+add
+			frame = (sBGRA2linear(frame)*mul)+add
+			frame = np.pad(frame, ((0,0),(pad_left,pad_right),(0,0)))
 			
 			if colorDebug & 0b10:
 				cv2.imshow('Frame', linear2sBGRA(frame))
 				if cv2.waitKey(0) & 0xFF == ord('s'):
 					break
 			
-			img_buff = frame.copy()
+			diffs = list(range(18))
 			for d in diffs:
-				#print("calc diff",d)
-				#print("init",img_buff[:2,:2])
-				img_buff = linear2sBGRA(frame - palette[d])
-				#print("sub",img_buff[:2,:2])
-				#img_buff = abs(img_buff)
-				#print("sqr",img_buff[:2,:2])
-				diffs[d] = img_buff.sum(2)
+				diffs[d] = linear2sBGRA(frame - palette[d]).sum(2)
 			
-			threads = []
 			print(f"\rFrame {frameCount}: Encoding...        ({completion}% total, {timedelta(seconds=round(perf_counter()-start))})", end='', flush=True)
 			for y in range(len(txt_buffer)):
 				for x in range(len(txt_buffer[y])):
-					threads.append(threading.Thread(target=encode_chunk, args=(frame[y*15:(y+1)*15, x*9:(x+1)*9],diffs,x,y)))#[y*15:(y+1)*15, x*9:(x+1)*9]
-					threads[-1].start()
-			for thread in threads:
-				thread.join()
+					q.put((frame[y*15:(y+1)*15, x*9:(x+1)*9],diffs,x,y))
+			q.join()
+			
 			print(f"\rFrame {frameCount}: Compressing...     ({completion}% total, {timedelta(seconds=round(perf_counter()-start))})", end='', flush=True)
 			#print(txt_buffer)
 			if frameCount > 0:
 				output_txt.write(',\n"')
-				output_txt.flush()
 			output_txt.write(encode_rle(txt_buffer))
 			# frames to skip: playback_speed*max(updated_tiles/24 + frame_sleep,min_delay) / (30/fps)
 			#print("\n",np.sum(txt_buffer != txt_lastframe))
