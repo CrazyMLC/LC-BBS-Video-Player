@@ -5,7 +5,7 @@ This is both a player and encoder of video. Put in a video file, and a javascrip
 
 This video encoding and playback is powered by variable frame timings, and RLE compression.
 
-This project is inspired by the work of [ethanhjennings](https://github.com/ethanhjennings/last-call-bbs-video-player), who made a funnier joke than I ever will.
+This project is inspired by the work of [ethanhjennings](https://github.com/ethanhjennings/last-call-bbs-video-player).
 
 # Controls
 
@@ -23,5 +23,3 @@ If you don't like dragging and dropping, you can run it in command line by provi
  Encoding can... take some time. On my machine it takes about 5-6 seconds per frame.
  
  If the script doesn't work, make sure you have ffmpeg installed, are using Python 3, and have installed the requirements.
-
-If you need help with anything else, many of the tips included in [ethanhjennings's video player Github page](https://github.com/ethanhjennings/last-call-bbs-video-player) are relevant to this one as well.
