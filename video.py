@@ -4,20 +4,58 @@ import numpy as np
 import subprocess,sys,os,math
 from time import sleep,perf_counter
 from datetime import timedelta
-colorDebug = 0
-
 if len(sys.argv) < 2:
 	quit()
 
-#i'm not going to do the piecewise version, and colour-science is very slow
-def sBGRA2linear(nparr):
+colorDebug = 0
+# 0 does nothing, 1 outputs a video of preprocessed images, 2 pauses after every preprocessing to show you the frame that's being encoded
+
+diff_mode = 0
+# 0 for simple diff, 1 for YCrCb distance
+
+optimize = 1
+# 0 for a thorough encoding, 1 for some shortcuts, 2 for limited charset, 3 for even fewer characters and limited preprocessing, 4 is only boxes
+# 1 should have no consequences over 0. 3 looks pretty good still, and encodes very quickly. 4 is very ugly but is an interesting contrast.
+
+playback_speed = 0.35
+# playback speed multiplier. while the encoder tells the player to wait X frames, the encoder will go forward X*speed frames instead.
+
+frame_sleep = 6
+# after the frame has finished loading (at 24 modified characters per second) the player will wait this many frames on the completed image, to let the viewer take it all in.
+
+min_delay = 10
+# reduces filesize and encoding time by limiting framerate in low-variance sections of the video.
+
+
+def BGR2linear(nparr):# i'm not going to do the piecewise version, and colour-science is very slow
 	temp = nparr.astype(np.float32)
 	temp /= 255.0
 	return temp ** 2.4
-def linear2sBGRA(nparr):
+def linear2BGR(nparr, int_convert = True):
 	temp = abs(nparr) ** (1.0/2.4)
 	temp *= 255.0
-	return temp.astype(np.uint8)
+	if int_convert:
+		return temp.astype(np.uint8)
+	else:
+		return temp
+def linear2GRAY(nparr, int_convert = True):
+	temp = abs(nparr) ** (1.0/2.4)
+	temp *= 255.0
+	temp = cv2.cvtColor(abs(temp), cv2.COLOR_BGRA2GRAY)
+	if int_convert:
+		return temp.astype(np.uint8)
+	else:
+		return temp
+
+def diff(img, color):# this is where the magic happens. if this goes wrong, the video looks like crap.
+	if diff_mode == 0:
+		return linear2BGR(img - color).sum(2)
+	elif diff_mode == 1:# ycrcb seems a bit better at color-coding things
+		new_img = cv2.cvtColor(linear2BGR(img), cv2.COLOR_BGR2YCrCb).astype(np.float32)
+		new_color = cv2.cvtColor(np.array([[linear2BGR(color)]]), cv2.COLOR_BGR2YCrCb).astype(np.float32)
+		return ((new_img - new_color)**2 * (2,1,1) ).sum(2)
+
+
 
 print("Resizing and lowering fps with ffmpeg...")
 subprocess.call(f'ffmpeg -loglevel error -i "{sys.argv[1]}" -an -n -vf "fps=30, scale=-1:300, pad=ceil(iw/2)*2:0" temp.mp4')
@@ -32,6 +70,8 @@ crop_amount = int(max(0,frame_width - 504)/2)# the terminal is only 504 pixels w
 if crop_amount:
 	frame_width = int(frame_width - 2*crop_amount)
 display_xoffset = int((504-frame_width)/18)# for dealing with videos that are too thin
+pad_left = 0
+pad_right = 0
 if frame_width % 9 > 0:
 	pad_left = 9 - (frame_width % 9)
 	frame_width += pad_left
@@ -43,20 +83,28 @@ if colorDebug:
 							1.0, (frame_width, frame_height))
 
 
+palette = BGR2linear(cv2.imread('palette.png'))[0]
 # to achieve a black value of roughly 48,47,25
-add = sBGRA2linear(np.array((48, 47, 25)))
+add = palette[0]
 
 # to achieve a white value of roughly 244,246,172 after the add
-mul = sBGRA2linear(np.array((244, 246, 172)))
+mul = palette[-1]
 mul -= add
 
 txt_lastframe = np.full((20,int((frame_width+8)/9)),'D5')
 txt_buffer = txt_lastframe.copy()
 
 font = cv2.imread('system_bold_bw.png',0)/255.0
-#chars = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz.,:;!?&#/\\%\'"0123456789+-*()[]^█▟▙▜▛▀▄▐▌▝▘▗▖─⚉═║╔╗╚╝╠╣╦╩╬>▲▼™`♦♣♠♥<☺☻ '
-palette = sBGRA2linear(cv2.imread('palette.png'))[0]
-palette_grey = cv2.cvtColor(sBGRA2linear(cv2.imread('palette.png')), cv2.COLOR_BGRA2GRAY)[0]
+font_chars = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz.,:;!?&#/\\%\'"0123456789+-*()[]^█▟▙▜▛▀▄▐▌▝▘▗▖─⚉═║╔╗╚╝╠╣╦╩╬>▲▼™`♦♣♠♥<☺☻ '
+if optimize == 4:
+	limited_set = [121]+[83]
+elif optimize == 3:
+	limited_set = list(range(83,96))+[51,63,121]
+elif optimize == 2:
+	limited_set = list(range(77,97))+[51,77,109,110,111,113,118,121]
+else:
+	limited_set = range(len(font_chars))
+palette_grey = cv2.imread('palette.png',0)[0]
 b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 # color (5 bits) and symbol (7 bits) perfectly fits into two base64 characters. there's even room to implement RLE.
 
@@ -64,45 +112,47 @@ def encode_chunk(img,diffs,bufx,bufy):
 	global txt_buffer
 	character = [1,1]#color,symbol
 	score = float('inf')#smaller is better
-	min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY))
-	if max_val-0.001 < palette_grey[0]:
-		#print("black")
+	
+	#let's see if we can't shortcut out of this
+	min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(linear2GRAY(img, False))
+	if max_val-(palette_grey[1]-palette_grey[0])*0.01 < palette_grey[0]:
+		#if the max value of this section of the image is only just above our darkest color, this is an empty tile.
 		txt_buffer[bufy][bufx] = 'D5'
 		return
-	if min_val+0.1 > palette_grey[-1]:
-		#print("white")
+	if min_val+(palette_grey[-1]-palette_grey[-2])*0.01 > palette_grey[-1]:
+		#if the min value of this section of the image is only just below our brightest value, this is a max brightness tile.
 		txt_buffer[bufy][bufx] = 'jT'
 		return
 	#there's already a lot of characters to check through, the colors only make it worse.
 	#so let's narrow down our options.
 	palmin = 1
 	palmax = 18
-	for i in range(1,18):
-		if max_val < palette_grey[i]:
-			palmax = i+2
-			break
-	for i in range(17,0,-1):
-		if min_val > palette_grey[i]:
-			palmin = i-1
-			break
+	if optimize > 0:
+		for i in range(1,18):
+			if max_val < palette_grey[i]:
+				palmax = i+2
+				break
+		for i in range(17,0,-1):
+			if min_val > palette_grey[i]:
+				palmin = i-1
+				break
 	
-	for sym in range(int(len(font[0])/11)):
-		char_img = sym*11 + 1
-		char_img = font[:, char_img:char_img+9]#we're ignoring the characters that overlap with neighbors for now (% and ™)
+	for sym in limited_set:
+		char_img = font[:, sym*11 + 1:sym*11 + 10]#we're ignoring the characters that overlap with neighbors for now (% and ™)
 		#let's check the black values of this character first. if the score from that alone is worse, then we can skip this character.
 		#we can also reuse these black values for each of the color values
-		temp_score = [0,0]#dark, light
-		temp_score[0] = np.sum(diffs[0][bufy*15:(bufy+1)*15, bufx*9:(bufx+1)*9]*(1-char_img))
-		#we can use char_img as a mask to lot us sum the difference values for this color. pretty sweet.
+		temp_score = [np.sum(diffs[0][bufy*15:(bufy+1)*15, bufx*9:(bufx+1)*9]*(1-char_img)),0]#dark, light
+		#we can use char_img as a mask to let us sum the difference values for this color. pretty sweet.
 		if temp_score[0] > score:
 			continue
 		
 		#now to check the possible colors
-		for col in range(max(1,palmin),min(18,palmax)):
-			temp_score[1] = np.sum(diffs[col][bufy*15:(bufy+1)*15, bufx*9:(bufx+1)*9]*char_img)
-			if sum(temp_score) < score:
-				character = [col, sym]
-				score = sum(temp_score)
+		if sym < 121:
+			for col in range(max(1,palmin),min(18,palmax)):
+				temp_score[1] = np.sum(diffs[col][bufy*15:(bufy+1)*15, bufx*9:(bufx+1)*9]*char_img)
+				if sum(temp_score) < score:
+					character = [col, sym]
+					score = sum(temp_score)
 		#we should have found the best character by now
 	#now to encode into base 64
 	result = f'{b64[(character[0] << 1) + (character[1] & 0b1000000 > 0)]}{b64[character[1] & 0b111111]}'
@@ -159,15 +209,10 @@ def unsharp_mask(image, kernel_size=(5, 5), sigma=1.0, amount=1.0, threshold=0):
 
 output_txt = open(os.path.basename(sys.argv[1])+'.js','w', encoding="utf-8")
 output_txt.write('let frames = ["')
-print("Scanning through frames...")
+print("Scanning through frames...\n")
 frameCount = 0
 delay = 0
-
-
-playback_speed = 0.35
-frame_sleep = 6
-min_delay = 10
-print(f"{round(100*playback_speed)}% playback speed.\nSleeping on rendered frames for {round(frame_sleep/30,2)} seconds.\nMinimum time between frames is {round(min_delay/30,2)} seconds.")
+print(f"{round(100*playback_speed)}% playback speed.\nSleeping on rendered frames for {round(frame_sleep/30,2)} seconds.\nMinimum time between frames is {round(min_delay/30,2)} seconds.\n")
 newFrame = True
 maxFrames = video.get(cv2.CAP_PROP_FRAME_COUNT)
 start = perf_counter()
@@ -177,29 +222,30 @@ while(newFrame):
 	if newFrame:
 		delay -= 1
 		if delay <= 0:
-			print(f"\rFrame {frameCount}: Preprocessing...   ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round((perf_counter()-start)/max(frameCount,1))}s per frame)", end='', flush=True)
+			print(f"\rFrame {frameCount}: Preprocessing...   ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round(float(perf_counter()-start)/max(frameCount,1),1)}s per frame)", end='', flush=True)
 			if crop_amount > 0:
 				frame = frame[:, crop_amount:-crop_amount]
-			frame = unsharp_mask(cv2.fastNlMeansDenoisingColored(frame,None,5,5,5,15), amount = 2.0)
-			frame = (sBGRA2linear(frame)*mul)+add
+			if optimize < 3:
+				frame = unsharp_mask(cv2.fastNlMeansDenoisingColored(frame,None,5,5,5,15), amount = 2.0)
+			frame = (BGR2linear(frame)*mul)+add
 			frame = np.pad(frame, ((0,0),(pad_left,pad_right),(0,0)))
 			
 			if colorDebug & 0b10:
-				cv2.imshow('Frame', linear2sBGRA(frame))
+				cv2.imshow('Frame', linear2BGR(frame))
 				if cv2.waitKey(0) & 0xFF == ord('s'):
 					break
 			
 			diffs = list(range(18))
 			for d in diffs:
-				diffs[d] = linear2sBGRA(frame - palette[d]).sum(2)
+				diffs[d] = diff(frame, palette[d])
 			
-			print(f"\rFrame {frameCount}: Encoding...        ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round((perf_counter()-start)/max(frameCount,1))}s per frame)", end='', flush=True)
+			print(f"\rFrame {frameCount}: Encoding...        ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round(float(perf_counter()-start)/max(frameCount,1),1)}s per frame)", end='', flush=True)
 			for y in range(len(txt_buffer)):
 				for x in range(len(txt_buffer[y])):
 					q.put((frame[y*15:(y+1)*15, x*9:(x+1)*9],diffs,x,y))
 			q.join()
 			
-			print(f"\rFrame {frameCount}: Compressing...     ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round((perf_counter()-start)/max(frameCount,1))}s per frame)", end='', flush=True)
+			print(f"\rFrame {frameCount}: Compressing...     ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round(float(perf_counter()-start)/max(frameCount,1),1)}s per frame)", end='', flush=True)
 			#print(txt_buffer)
 			if frameCount > 0:
 				output_txt.write(',\n"')
@@ -213,7 +259,7 @@ while(newFrame):
 			output_txt.flush()
 			frameCount += 1
 			if colorDebug:
-				frame = linear2sBGRA(frame)
+				frame = linear2BGR(frame)
 		if colorDebug:
 				result.write(frame)
 output_txt.write(f"""];
@@ -325,6 +371,6 @@ function render(set_count) {{
 """)
 output_txt.close()
 end()
-print("The video was successfully processed.")
-print(f"{frameCount} frames were encoded in {round(perf_counter()-start,1)} seconds.")
+print("\n\nThe video was successfully processed.")
+print(f"{frameCount} frames were encoded in {timedelta(seconds=round(perf_counter()-start))}")
 input("\nPress any key to exit.")
