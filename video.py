@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import subprocess,sys,os
 from time import sleep,perf_counter
+from datetime import timedelta
 colorDebug = 0
 
 if len(sys.argv) < 2:
@@ -158,15 +159,16 @@ frame_sleep = 6
 min_delay = 10
 print(f"{round(100*playback_speed)}% playback speed.\nSleeping on rendered frames for {round(frame_sleep/30,2)} seconds.\nMinimum time between frames is {round(min_delay/30,2)} seconds.")
 newFrame = True
+maxFrames = video.get(cv2.CAP_PROP_FRAME_COUNT)
 start = perf_counter()
 while(newFrame):
 	newFrame, frame = video.read()
-	completion = int(video.get(cv2.CAP_PROP_POS_AVI_RATIO)*100)
+	completion = int((video.get(cv2.CAP_PROP_POS_FRAMES)/maxFrames)*100)
 	if newFrame:
 		delay -= 1
 		if delay <= 0:
 			diffs = list(range(18))
-			print(f"\rFrame {frameCount}: Preprocessing... ({completion}%)   ", end='', flush=True)
+			print(f"\rFrame {frameCount}: Preprocessing...   ({completion}% total, {timedelta(seconds=round(perf_counter()-start))})", end='', flush=True)
 			frame = unsharp_mask(cv2.fastNlMeansDenoisingColored(frame,None,5,5,5,15), amount = 2.0)
 			frame = (sBGRA2linear(frame[:, crop_amount:-crop_amount])*mul)+add
 			
@@ -186,14 +188,14 @@ while(newFrame):
 				diffs[d] = img_buff.sum(2)
 			
 			threads = []
-			print(f"\rFrame {frameCount}: Encoding...      ({completion}%)   ", end='', flush=True)
+			print(f"\rFrame {frameCount}: Encoding...        ({completion}% total, {timedelta(seconds=round(perf_counter()-start))})", end='', flush=True)
 			for y in range(len(txt_buffer)):
 				for x in range(len(txt_buffer[y])):
 					threads.append(threading.Thread(target=encode_chunk, args=(frame[y*15:(y+1)*15, x*9:(x+1)*9],diffs,x,y)))#[y*15:(y+1)*15, x*9:(x+1)*9]
 					threads[-1].start()
 			for thread in threads:
 				thread.join()
-			print(f"\rFrame {frameCount}: Compressing...   ({completion}%)   ", end='', flush=True)
+			print(f"\rFrame {frameCount}: Compressing...     ({completion}% total, {timedelta(seconds=round(perf_counter()-start))})", end='', flush=True)
 			#print(txt_buffer)
 			if frameCount > 0:
 				output_txt.write(',\n"')
