@@ -177,7 +177,7 @@ while(newFrame):
 	if newFrame:
 		delay -= 1
 		if delay <= 0:
-			print(f"\rFrame {frameCount}: Preprocessing...   ({completion}% total, {timedelta(seconds=round(perf_counter()-start))})", end='', flush=True)
+			print(f"\rFrame {frameCount}: Preprocessing...   ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round((perf_counter()-start)/max(frameCount,1))}s per frame)", end='', flush=True)
 			if crop_amount > 0:
 				frame = frame[:, crop_amount:-crop_amount]
 			frame = unsharp_mask(cv2.fastNlMeansDenoisingColored(frame,None,5,5,5,15), amount = 2.0)
@@ -193,13 +193,13 @@ while(newFrame):
 			for d in diffs:
 				diffs[d] = linear2sBGRA(frame - palette[d]).sum(2)
 			
-			print(f"\rFrame {frameCount}: Encoding...        ({completion}% total, {timedelta(seconds=round(perf_counter()-start))})", end='', flush=True)
+			print(f"\rFrame {frameCount}: Encoding...        ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round((perf_counter()-start)/max(frameCount,1))}s per frame)", end='', flush=True)
 			for y in range(len(txt_buffer)):
 				for x in range(len(txt_buffer[y])):
 					q.put((frame[y*15:(y+1)*15, x*9:(x+1)*9],diffs,x,y))
 			q.join()
 			
-			print(f"\rFrame {frameCount}: Compressing...     ({completion}% total, {timedelta(seconds=round(perf_counter()-start))})", end='', flush=True)
+			print(f"\rFrame {frameCount}: Compressing...     ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round((perf_counter()-start)/max(frameCount,1))}s per frame)", end='', flush=True)
 			#print(txt_buffer)
 			if frameCount > 0:
 				output_txt.write(',\n"')

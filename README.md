@@ -20,7 +20,7 @@ Anything Else - Toggle UI
 To make your own servers (in order words, videos to play in Last Call BBS) you must drag and drop video files into video.py.
 If you don't like dragging and dropping, you can run it in command line by providing a video file as the first argument. There are no other command line options. (even though there should be.)
 
- Encoding can... take some time. On my machine it takes about 5-6 seconds per frame.
+ Encoding can... take some time. On my machine it takes about 5 seconds per frame.
  
  If the script doesn't work, make sure you have ffmpeg installed, are using Python 3, and have installed the requirements.
 
