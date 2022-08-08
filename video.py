@@ -31,7 +31,7 @@ frame_width = int(video.get(3))
 crop_amount = int(max(0,frame_width - 504)/2)# the terminal is only 504 pixels wide
 if crop_amount:
 	frame_width = int(frame_width - 2*crop_amount)
-display_xoffset = (504-frame_width)/2# for dealing with videos that are too thin
+display_xoffset = int((504-frame_width)/18)# for dealing with videos that are too thin
 if frame_width % 9 > 0:
 	pad_left = 9 - (frame_width % 9)
 	frame_width += pad_left
