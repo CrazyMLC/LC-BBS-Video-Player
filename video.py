@@ -103,7 +103,7 @@ elif optimize == 3:
 elif optimize == 2:
 	limited_set = list(range(77,97))+[51,77,109,110,111,113,118,121]
 else:
-	limited_set = range(len(font_chars)+1)
+	limited_set = range(len(font_chars))
 palette_grey = cv2.imread('palette.png',0)[0]
 b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 # color (5 bits) and symbol (7 bits) perfectly fits into two base64 characters. there's even room to implement RLE.
@@ -147,14 +147,16 @@ def encode_chunk(img,diffs,bufx,bufy):
 		#we can use char_img as a mask to let us sum the difference values for this color. pretty sweet.
 		if temp_score[0] > score:
 			continue
-		
+		elif sym == 121:
+			character = [1, sym]
+			score = temp_score[0]
+			continue
 		#now to check the possible colors
-		if sym < 121:
-			for col in range(max(1,palmin),min(18,palmax)):
-				temp_score[1] = np.sum(diffs[col][bufy*15:(bufy+1)*15, bufx*9:(bufx+1)*9]*char_img)
-				if sum(temp_score) < score:
-					character = [col, sym]
-					score = sum(temp_score)
+		for col in range(max(1,palmin),min(18,palmax)):
+			temp_score[1] = np.sum(diffs[col][bufy*15:(bufy+1)*15, bufx*9:(bufx+1)*9]*char_img)
+			if sum(temp_score) < score:
+				character = [col, sym]
+				score = sum(temp_score)
 		#we should have found the best character by now
 	#now to encode into base 64
 	result = f'{b64[(character[0] << 1) + (character[1] & 0b1000000 > 0)]}{b64[character[1] & 0b111111]}'
