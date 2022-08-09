@@ -10,8 +10,8 @@ if len(sys.argv) < 2:
 colorDebug = 0
 # 0 does nothing, 1 outputs a video of preprocessed images, 2 pauses after every preprocessing to show you the frame that's being encoded
 
-diff_mode = 0
-# 0 for simple diff, 1 for YCrCb distance
+diff_mode = 2
+# 0 for simple bgr diff, 1 for YCrCb distance, 2 for grayscale distance
 
 optimize = 1
 # 0 for a thorough encoding, 1 for some shortcuts, 2 for limited charset, 3 for even fewer characters and limited preprocessing, 4 is only boxes
@@ -49,11 +49,15 @@ def linear2GRAY(nparr, int_convert = True):
 
 def diff(img, color):# this is where the magic happens. if this goes wrong, the video looks like crap.
 	if diff_mode == 0:
-		return linear2BGR(img - color).sum(2)
-	elif diff_mode == 1:# ycrcb seems a bit better at color-coding things
+		return linear2BGR(img - color, False).sum(2)
+	elif diff_mode == 1:# ycrcb method is able to take color into account, biasing non-blue towards less saturated palette entries.
 		new_img = cv2.cvtColor(linear2BGR(img), cv2.COLOR_BGR2YCrCb).astype(np.float32)
 		new_color = cv2.cvtColor(np.array([[linear2BGR(color)]]), cv2.COLOR_BGR2YCrCb).astype(np.float32)
-		return ((new_img - new_color)**2 * (2,1,1) ).sum(2)
+		return (((new_img - new_color) * (2,1,1))**2 ).sum(2)
+	elif diff_mode == 2:# grayscale will best depict the overall shape of the image, but lacks any color information to color-code content.
+		new_img = linear2GRAY(img, False)# grayscale also takes half the time of BGR, for reasons unknown
+		new_color = linear2GRAY(np.array([[color]]), False)
+		return (new_img - new_color)**2
 
 
 
@@ -216,7 +220,7 @@ output_txt.write('let frames = ["')
 print("Scanning through frames...\n")
 frameCount = 0
 delay = 0
-print(f"{round(100*playback_speed)}% playback speed.\nSleeping on rendered frames for {round(frame_sleep/30,2)} seconds.\nMinimum time between frames is {round(min_delay/30,2)} seconds.\n")
+print(f"{round(100*playback_speed)}% playback speed.\nSleeping on rendered frames for {round(frame_sleep/30,2)} seconds.\nCapping frame rate at {round(30/min_delay,2)} frames per second.\nUsing {['BGR','YCrCb','grayscale'][diff_mode]} diff mode and cutting {optimize} corner{'s' if optimize != 1 else ''}.\n")
 newFrame = True
 maxFrames = video.get(cv2.CAP_PROP_FRAME_COUNT)
 start = perf_counter()
