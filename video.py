@@ -103,7 +103,7 @@ elif optimize == 3:
 elif optimize == 2:
 	limited_set = list(range(77,97))+[51,77,109,110,111,113,118,121]
 else:
-	limited_set = range(len(font_chars))
+	limited_set = range(len(font_chars)+1)
 palette_grey = cv2.imread('palette.png',0)[0]
 b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 # color (5 bits) and symbol (7 bits) perfectly fits into two base64 characters. there's even room to implement RLE.
@@ -112,22 +112,24 @@ def encode_chunk(img,diffs,bufx,bufy):
 	global txt_buffer
 	character = [1,1]#color,symbol
 	score = float('inf')#smaller is better
-	
-	#let's see if we can't shortcut out of this
-	min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(linear2GRAY(img, False))
-	if max_val-(palette_grey[1]-palette_grey[0])*0.01 < palette_grey[0]:
-		#if the max value of this section of the image is only just above our darkest color, this is an empty tile.
-		txt_buffer[bufy][bufx] = 'D5'
-		return
-	if min_val+(palette_grey[-1]-palette_grey[-2])*0.01 > palette_grey[-1]:
-		#if the min value of this section of the image is only just below our brightest value, this is a max brightness tile.
-		txt_buffer[bufy][bufx] = 'jT'
-		return
-	#there's already a lot of characters to check through, the colors only make it worse.
-	#so let's narrow down our options.
 	palmin = 1
 	palmax = 18
+	
 	if optimize > 0:
+		#let's see if we can't shortcut out of this
+		min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(linear2GRAY(img, False))
+		if max_val-(palette_grey[1]-palette_grey[0])*0.01 < palette_grey[0]:#need to change this to use the diffs at some point...
+			#if the max value of this section of the image is only just above our darkest color, this is an empty tile.
+			txt_buffer[bufy][bufx] = 'D5'
+			return
+		if min_val+(palette_grey[-1]-palette_grey[-2])*0.01 > palette_grey[-1]:
+			#if the min value of this section of the image is only just below our brightest value, this is a max brightness tile.
+			txt_buffer[bufy][bufx] = 'jT'
+			return
+		#there's already a lot of characters to check through, the colors only make it worse.
+		#so let's narrow down our options.
+	
+	
 		for i in range(1,18):
 			if max_val < palette_grey[i]:
 				palmax = i+2
