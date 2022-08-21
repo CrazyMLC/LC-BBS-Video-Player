@@ -7,11 +7,12 @@ from datetime import timedelta
 if len(sys.argv) < 2:
 	quit()
 
+
 colorDebug = 0
 # 0 does nothing, 1 outputs a video of preprocessed images, 2 pauses after every preprocessing to show you the frame that's being encoded
 
 diff_mode = 2
-# 0 for simple bgr diff, 1 for YCrCb distance, 2 for grayscale distance
+# 0 for simple bgr diff, 1 for YCrCb distance, 2 for grayscale distance, 3 for bgr + gray
 
 optimize = 1
 # 0 for a thorough encoding, 1 for some shortcuts, 2 for limited charset, 3 for even fewer characters and limited preprocessing, 4 is only boxes
@@ -25,6 +26,10 @@ frame_sleep = 6
 
 min_delay = 10
 # reduces filesize and encoding time by limiting framerate in low-variance sections of the video.
+
+diff_threshold = 0.8
+# if making a frame a diff doesn't reduce the size below this threshold, it will be a keyframe instead.
+
 
 
 def BGR2linear(nparr):# i'm not going to do the piecewise version, and colour-science is very slow
@@ -47,21 +52,23 @@ def linear2GRAY(nparr, int_convert = True):
 	else:
 		return temp
 
-def diff(img, color):# this is where the magic happens. if this goes wrong, the video looks like crap.
-	if diff_mode == 0:
+def diff(img, color, mode):# this is where the magic happens. if this goes wrong, the video looks like crap.
+	if mode == 0:
 		return linear2BGR(img - color, False).sum(2)
-	elif diff_mode == 1:# ycrcb method is able to take color into account, biasing non-blue towards less saturated palette entries.
+	elif mode == 1:# ycrcb method is able to take color into account, biasing non-blue towards less saturated palette entries.
 		new_img = cv2.cvtColor(linear2BGR(img), cv2.COLOR_BGR2YCrCb).astype(np.float32)
 		new_color = cv2.cvtColor(np.array([[linear2BGR(color)]]), cv2.COLOR_BGR2YCrCb).astype(np.float32)
 		return (((new_img - new_color) * (2,1,1))**2 ).sum(2)
-	elif diff_mode == 2:# grayscale will best depict the overall shape of the image, but lacks any color information to color-code content.
+	elif mode == 2:# grayscale will best depict the overall shape of the image, but lacks any color information to color-code content.
 		new_img = linear2GRAY(img, False)# grayscale also takes half the time of BGR, for reasons unknown
 		new_color = linear2GRAY(np.array([[color]]), False)
 		return (new_img - new_color)**2
+	elif mode == 3:# mixing modes might be able to fix grayscale's bluriness, and BGR's sharpness
+		return diff(img, color, 0)*8 + diff(img, color, 2)
 
 
 
-print("Resizing and lowering fps with ffmpeg...")
+print("Resizing resolution and modifying fps with ffmpeg...")
 subprocess.call(f'ffmpeg -loglevel error -i "{sys.argv[1]}" -an -n -vf "fps=30, scale=-1:300, pad=ceil(iw/2)*2:0" temp.mp4')
 print("Capturing ffmpeg output...")
 video = cv2.VideoCapture('temp.mp4')
@@ -163,8 +170,7 @@ def encode_chunk(img,diffs,bufx,bufy):
 				score = sum(temp_score)
 		#we should have found the best character by now
 	#now to encode into base 64
-	result = f'{b64[(character[0] << 1) + (character[1] & 0b1000000 > 0)]}{b64[character[1] & 0b111111]}'
-	txt_buffer[bufy][bufx] = result
+	txt_buffer[bufy][bufx] = b64[(character[0] << 1) + (character[1] & 0b1000000 > 0)] + b64[character[1] & 0b111111]
 	#print(character,score,temp_score)
 
 q = queue.Queue()
@@ -181,17 +187,32 @@ def encode_rle(txt):
 	result = flat[0]
 	i = 1
 	while i < len(flat):
-		if i+1 < len(flat) and flat[i-1] == flat[i] == flat[i+1]:
-			result += b64[0]
+		if i+1 < len(flat) and (flat[i-1] == flat[i] == flat[i+1] or '/5' == flat[i] == flat[i+1]):
+			flag = flat[i] == '/5'
 			count = 2
-			while i+count < len(flat) and flat[i+count] == flat[i+count-1] and count-1 < len(b64):
+			while i+count < len(flat) and flat[i+count] == flat[i+count-1] and count-2 < 895:
 				count += 1
 			i += count
-			result += b64[count-2]
+			count -= 2
+			result += b64[((count>>6)<<1) + 36 + flag] +  b64[count & 0b111111]
 		else:
 			result += flat[i]
 			i+=1
 	return result
+
+keyframes = []
+def compress_frame(f, last_f, f_count):
+	global keyframes
+	diff = f.copy()
+	diff[f==last_f] = '/5'
+	diffstr = encode_rle(diff)
+	fstr = encode_rle(f)
+	if len(diffstr)/len(fstr) > diff_threshold or f_count == 0:
+		keyframes += [f_count]
+		return fstr
+	else:
+		return diffstr
+	
 
 def end():
 	video.release()
@@ -199,6 +220,7 @@ def end():
 	os.remove('temp.mp4')
 	if colorDebug:
 		result.release()
+	output_txt.close()
 		#os.system('debug.avi')
 
 
@@ -220,23 +242,25 @@ output_txt.write('let frames = ["')
 print("Scanning through frames...\n")
 frameCount = 0
 delay = 0
-print(f"{round(100*playback_speed)}% playback speed.\nSleeping on rendered frames for {round(frame_sleep/30,2)} seconds.\nCapping frame rate at {round(30/min_delay,2)} frames per second.\nUsing {['BGR','YCrCb','grayscale'][diff_mode]} diff mode and cutting {optimize} corner{'s' if optimize != 1 else ''}.\n")
+print(f"{round(100*playback_speed)}% playback speed.\nSleeping on rendered frames for {round(frame_sleep/30,2)} seconds.\nCapping frame rate at {round(30/min_delay,2)} frames per second.\nUsing {['BGR','YCrCb','grayscale','mixed'][diff_mode]} diff mode and cutting {optimize} corner{'s' if optimize != 1 else ''}.\n")
 newFrame = True
 maxFrames = video.get(cv2.CAP_PROP_FRAME_COUNT)
 start = perf_counter()
 while(newFrame):
 	newFrame, frame = video.read()
-	completion = int((video.get(cv2.CAP_PROP_POS_FRAMES)/maxFrames)*100)
+	completion = int(((video.get(cv2.CAP_PROP_POS_FRAMES)+1)/maxFrames)*100)
 	if newFrame:
 		delay -= 1
 		if delay <= 0:
-			print(f"\rFrame {frameCount}: Preprocessing...   ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round(float(perf_counter()-start)/max(frameCount,1),1)}s per frame)", end='', flush=True)
+			frameCount += 1
+			print(f"\rFrame {frameCount}: Preprocessing...   ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round(float(perf_counter()-start)/frameCount,1)}s per frame)", end='', flush=True)
 			if crop_amount > 0:
 				frame = frame[:, crop_amount:-crop_amount]
 			if optimize < 3:
 				frame = unsharp_mask(cv2.fastNlMeansDenoisingColored(frame,None,5,5,5,15), amount = 2.0)
 			frame = (BGR2linear(frame)*mul)+add
-			frame = np.pad(frame, ((0,0),(pad_left,pad_right),(0,0)))
+			if pad_left or pad_right:
+				frame = np.pad(frame, ((0,0),(pad_left,pad_right),(0,0)))
 			
 			if colorDebug & 0b10:
 				cv2.imshow('Frame', linear2BGR(frame))
@@ -245,19 +269,19 @@ while(newFrame):
 			
 			diffs = list(range(18))
 			for d in diffs:
-				diffs[d] = diff(frame, palette[d])
+				diffs[d] = diff(frame, palette[d], diff_mode)
 			
-			print(f"\rFrame {frameCount}: Encoding...        ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round(float(perf_counter()-start)/max(frameCount,1),1)}s per frame)", end='', flush=True)
+			print(f"\rFrame {frameCount}: Encoding...        ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round(float(perf_counter()-start)/frameCount,1)}s per frame)", end='', flush=True)
 			for y in range(len(txt_buffer)):
 				for x in range(len(txt_buffer[y])):
 					q.put((frame[y*15:(y+1)*15, x*9:(x+1)*9],diffs,x,y))
 			q.join()
 			
-			print(f"\rFrame {frameCount}: Compressing...     ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round(float(perf_counter()-start)/max(frameCount,1),1)}s per frame)", end='', flush=True)
+			print(f"\rFrame {frameCount}: Compressing...     ({completion}% total, {timedelta(seconds=round(perf_counter()-start))}, {round(float(perf_counter()-start)/frameCount,1)}s per frame)", end='', flush=True)
 			#print(txt_buffer)
-			if frameCount > 0:
+			if frameCount > 1:
 				output_txt.write(',\n"')
-			output_txt.write(encode_rle(txt_buffer))
+			output_txt.write(compress_frame(txt_buffer,txt_lastframe,frameCount-1))
 			# frames to skip: playback_speed*max(updated_tiles/24 + frame_sleep,min_delay) / (30/fps)
 			#print("\n",np.sum(txt_buffer != txt_lastframe))
 			delay = min(max(np.sum(txt_buffer != txt_lastframe)/24.0 + frame_sleep, min_delay),65)
@@ -265,19 +289,22 @@ while(newFrame):
 			delay *= playback_speed
 			txt_lastframe = txt_buffer.copy()
 			output_txt.flush()
-			frameCount += 1
 			if colorDebug:
 				frame = linear2BGR(frame)
 		if colorDebug:
 				result.write(frame)
+
+
 output_txt.write(f"""];
 let width = {len(txt_buffer[0])};
 let offset = {int(display_xoffset)};
 let name = '{os.path.basename(sys.argv[1])}';
+let keyframes = [{','.join(str(i) for i in keyframes)}];
 let font = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz.,:;!?&#/\\\\%\\'"0123456789+-*()[]^█▟▙▜▛▀▄▐▌▝▘▗▖─⚉═║╔╗╚╝╠╣╦╩╬>▲▼™`♦♣♠♥<☺☻ ';
 let b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 var curFrame;
+var curKeyframe
 var displayed;
 var counter;
 var playing;
@@ -340,12 +367,19 @@ function onInput(key) {{
 	}}
 }}
 
-function render(set_count) {{
-	clearScreen();
-	if (frames[curFrame] == undefined) {{
+function render(set_count, frame, full_render) {{
+	if (typeof frame == 'undefined') {{
+		frame = curFrame;
+	}}
+	if (frames[frame] == undefined) {{
+		clearScreen();
 		return;
 	}}
-	var frame = frames[curFrame];
+	//if ((typeof full_render != 'undefined' && full_render) || (!keyframes.includes(frame) )) {{
+	if (keyframes.indexOf(frame) == -1) {{
+		render(false,frame-1);
+	}}
+	frame = frames[frame];
 	var last = [0,"A"];
 	var readpos = 0;
 	for (var i = 0; i < width*20; readpos++) {{
@@ -353,12 +387,17 @@ function render(set_count) {{
 		var num2 = frame[readpos*2+1];
 		num1 = b64.indexOf(num1);
 		num2 = b64.indexOf(num2);
-		if (num1 == 0) {{
-			num2+=2;
-			while (num2 > 0) {{
-				drawText(last[1],last[0],(i%width)+offset,i/width|0);
-				i++;
-				num2--;
+		if (num1 > 35 && num1 < 63) {{
+			num2 += (((num1-36)>>1)<<6)+2;
+			num1 = num1 & 1;
+			if (!num1) {{
+				while (num2 > 0) {{
+					drawText(last[1],last[0],(i%width)+offset,i/width|0);
+					i++;
+					num2--;
+				}}
+			}} else {{
+				i += num2;
 			}}
 		}} else {{
 			var col = num1 >> 1;
@@ -377,8 +416,8 @@ function render(set_count) {{
 	}}
 }}
 """)
-output_txt.close()
 end()
+print(f"\rFrame {frameCount}: Completed...       (100% total, {timedelta(seconds=round(perf_counter()-start))}, {round(float(perf_counter()-start)/frameCount,1)}s per frame)", end='', flush=True)
 print("\n\nThe video was successfully processed.")
 print(f"{frameCount} frames were encoded in {timedelta(seconds=round(perf_counter()-start))}")
 input("\nPress any key to exit.")
