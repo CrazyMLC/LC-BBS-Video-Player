@@ -184,16 +184,16 @@ for i in range(32):
 
 def encode_rle(txt):
 	flat = txt.flatten()
-	result = flat[0]
-	i = 1
+	result = ""
+	i = 0
 	while i < len(flat):
-		if i+1 < len(flat) and (flat[i-1] == flat[i] == flat[i+1] or '/5' == flat[i] == flat[i+1]):
-			flag = flat[i] == '/5'
-			count = 2
-			while i+count < len(flat) and flat[i+count] == flat[i+count-1] and count-2 < 895:
+		if i+1 < len(flat) and ((i>0 and flat[i-1] == flat[i] == flat[i+1]) or '//' == flat[i]):
+			flag = flat[i] == '//'
+			count = 2-flag
+			while i+count < len(flat) and flat[i+count] == flat[i+count-1] and count-2 < 895-flag:
 				count += 1
 			i += count
-			count -= 2
+			count -= 2-flag
 			result += b64[((count>>6)<<1) + 36 + flag] +  b64[count & 0b111111]
 		else:
 			result += flat[i]
@@ -204,7 +204,7 @@ keyframes = []
 def compress_frame(f, last_f, f_count):
 	global keyframes
 	diff = f.copy()
-	diff[f==last_f] = '/5'
+	diff[f==last_f] = '//'
 	diffstr = encode_rle(diff)
 	fstr = encode_rle(f)
 	if len(diffstr)/len(fstr) > diff_threshold or f_count == 0:
@@ -387,7 +387,7 @@ function render(set_count, frame, full_render) {{
 		var num2 = frame[readpos*2+1];
 		num1 = b64.indexOf(num1);
 		num2 = b64.indexOf(num2);
-		if (num1 > 35 && num1 < 63) {{
+		if (num1 > 35) {{
 			num2 += (((num1-36)>>1)<<6)+2;
 			num1 = num1 & 1;
 			if (!num1) {{
@@ -397,7 +397,7 @@ function render(set_count, frame, full_render) {{
 					num2--;
 				}}
 			}} else {{
-				i += num2;
+				i += num2-1;
 			}}
 		}} else {{
 			var col = num1 >> 1;
