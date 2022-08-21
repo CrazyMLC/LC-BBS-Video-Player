@@ -417,7 +417,6 @@ function render(set_count, frame, full_render) {{
 }}
 """)
 end()
-print(f"\rFrame {frameCount}: Completed...       (100% total, {timedelta(seconds=round(perf_counter()-start))}, {round(float(perf_counter()-start)/frameCount,1)}s per frame)", end='', flush=True)
+print(f"\rFrame {frameCount}: Completed.         (100% total, {timedelta(seconds=round(perf_counter()-start))}, {round(float(perf_counter()-start)/frameCount,1)}s per frame)", end='', flush=True)
 print("\n\nThe video was successfully processed.")
-print(f"{frameCount} frames were encoded in {timedelta(seconds=round(perf_counter()-start))}")
 input("\nPress any key to exit.")
